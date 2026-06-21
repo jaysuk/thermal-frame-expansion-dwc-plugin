@@ -1,0 +1,23 @@
+# GitHub Release titles for thermal-frame-expansion, one per line (blank lines and # comments ignored).
+# Picked by version index (semver-sorted), wrapping if it runs out. Thermal/expansion puns — top up
+# the list as it gets low (the release workflow warns when few unused titles remain).
+Hot Take
+Thermal Throttle
+Expanding Horizons
+Coefficient of Cool
+Heat of the Moment
+Drift Compatible
+Warm Reception
+Some Like It Hot
+Soak It Up
+The Big Chill
+Rising Temperatures
+Linear Thinking
+Best Fit Forward
+Slope Intercept
+Degrees of Freedom
+Frame of Reference
+Probe and Prosper
+Steady State
+Cold Start
+Feeling the Heat

@@ -1,0 +1,15 @@
+{
+	"id": "ThermalFrameExpansion",
+	"name": "Thermal Frame Expansion",
+	"author": "James Skitt",
+	"version": "1.0.0",
+	"license": "GPL-3.0-or-later",
+	"homepage": "https://github.com/jaysuk/thermal-frame-expansion-dwc-plugin",
+	"dwcVersion": "auto-major",
+	"tags": [
+		"thermal",
+		"calibration",
+		"z-offset",
+		"frame-expansion"
+	]
+}

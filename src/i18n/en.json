@@ -1,0 +1,31 @@
+{
+	"title": "Thermal Frame Expansion",
+	"menuCaption": "Thermal Expansion",
+	"updates": {
+		"title": "Thermal Frame Expansion update",
+		"available": "Update available: v{version}",
+		"installedNow": "Installed: v{version}",
+		"notifyPlugin": "Thermal Frame Expansion v{version} is available. Open Plugins → Thermal Expansion to update.",
+		"notifyDwc": "Thermal Frame Expansion v{version} needs DuetWebControl {dwc} — update DWC first.",
+		"updateNow": "Update now",
+		"checkNow": "Check now",
+		"dismiss": "Dismiss",
+		"notes": "Release notes",
+		"needsDwc": "Needs DuetWebControl {dwc} (you have {running})",
+		"applyFailed": "No downloadable asset found for this release.",
+		"corsBlocked": "Couldn't fetch the update automatically — opening the download instead.",
+		"installedReload": "v{version} installed. Reload DWC to finish.",
+		"reloadPrompt": "Update installed — reload DWC to finish.",
+		"reload": "Reload",
+		"upToDate": "Up to date (v{version})",
+		"autoCheck": "Check for updates on load"
+	},
+	"diagnostics": {
+		"title": "Diagnostics",
+		"hint": "Bundle plugin versions, recent errors and a privacy-scrubbed object model to attach to a bug report.",
+		"download": "Download report",
+		"copy": "Copy report",
+		"copied": "Diagnostics copied to clipboard.",
+		"copyFailed": "Couldn't copy — try the download instead."
+	}
+}
