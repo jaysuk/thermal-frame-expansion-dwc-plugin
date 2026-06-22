@@ -62,6 +62,11 @@
 											<v-text-field v-model.number="config.nSamples" label="Probes per interval"
 														  type="number" min="1" max="5" variant="outlined" density="compact" />
 										</v-col>
+										<v-col cols="6">
+											<v-text-field v-model.number="config.heatTimeout" label="Heat timeout (min)"
+														  type="number" min="1" max="120" variant="outlined" density="compact"
+														  hint="Abort if a heater can't reach target in this time" persistent-hint />
+										</v-col>
 									</v-row>
 								</v-col>
 
@@ -74,15 +79,26 @@
 												  hint='e.g. G28 Z  or  M98 P"/sys/homez-thermal.g"' persistent-hint
 												  variant="outlined" density="compact" class="mb-2" />
 									<v-row dense>
-										<v-col cols="6">
+										<v-col cols="4">
 											<v-text-field v-model="config.probeX" label="Probe X (empty = centre)"
 														  type="number" variant="outlined" density="compact" />
 										</v-col>
-										<v-col cols="6">
+										<v-col cols="4">
 											<v-text-field v-model="config.probeY" label="Probe Y (empty = centre)"
 														  type="number" variant="outlined" density="compact" />
 										</v-col>
+										<v-col cols="4">
+											<v-text-field v-model.number="config.probeZHeight" label="Probe Z height (mm)"
+														  type="number" min="0" step="0.1" variant="outlined" density="compact"
+														  hint="Nozzle dive/start height before each G30" persistent-hint />
+										</v-col>
 									</v-row>
+									<v-text-field v-model="config.probeSetupCmd" label="Probe setup command (before probing)"
+												  hint='Runs once before the first G30 — e.g. M558 K0 P5 ... or M98 P"/sys/nozzle-probe-setup.g" to switch from your scanning probe to nozzle probing'
+												  persistent-hint variant="outlined" density="compact" class="mt-2" />
+									<v-text-field v-model="config.probeRestoreCmd" label="Probe restore command (after / on abort)"
+												  hint='Runs at the end and on abort — e.g. M98 P"/sys/scanning-probe-restore.g" to put your normal probe back'
+												  persistent-hint variant="outlined" density="compact" class="mt-2" />
 								</v-col>
 							</v-row>
 
@@ -326,10 +342,18 @@ const config = reactive({
 	coolDuration: 0,
 	measureInterval: 1,
 	nSamples: 3,
+	/** Max minutes to wait for a heater to reach target before aborting (heater-fault guard). */
+	heatTimeout: 15,
 	trammingCmd: "G32",
 	homeZCmd: "G28 Z",
 	probeX: "" as string | number,
 	probeY: "" as string | number,
+	/** Z height (mm) the nozzle is lifted to before each probe — the probe's dive/start height. */
+	probeZHeight: 5,
+	/** Commands run ONCE before probing starts (e.g. select/configure the nozzle probe). */
+	probeSetupCmd: "",
+	/** Commands run at the end (and on abort) to restore your normal probe (optional). */
+	probeRestoreCmd: "",
 });
 
 // ── Measurement state ──────────────────────────────────────────────────────────────────────────
@@ -468,8 +492,30 @@ function getCurrentTemps(): { bedTemp: number | null; heTemp: number | null; fra
 	};
 }
 
+/**
+ * Poll a heater's live temperature until it reaches `target − tolerance`, updating the progress/phase
+ * text. Throws if it hasn't reached target within `config.heatTimeout` minutes (heater-fault guard).
+ * Returns early (without throwing) if the run is aborted.
+ */
+async function waitForHeater(label: string, getCurrent: () => number, target: number, tolerance: number): Promise<void> {
+	const start = Date.now();
+	const timeoutMs = Math.max(1, config.heatTimeout) * 60 * 1000;
+	while (measuring.value) {
+		const current = getCurrent();
+		progress.value = Math.round(Math.min(99, (current / target) * 100));
+		const left = Math.ceil((timeoutMs - (Date.now() - start)) / 1000);
+		phaseMessage.value = `${label} ${current.toFixed(1)} / ${target}°C (timeout in ${Math.max(0, Math.floor(left / 60))}m ${Math.max(0, left % 60)}s)`;
+		if (current >= target - tolerance) return;
+		if (Date.now() - start > timeoutMs) {
+			throw new Error(`${label} only reached ${current.toFixed(1)}°C of ${target}°C within ${config.heatTimeout} min — heaters turned off. Check the heater/PID/thermistor, then retry.`);
+		}
+		await sleep(2000);
+	}
+}
+
 async function doProbe(): Promise<number> {
-	await send("G1 Z5 F600");
+	const diveZ = config.probeZHeight > 0 ? config.probeZHeight : 5;
+	await send(`G1 Z${diveZ.toFixed(2)} F600`);
 	await send(`G1 X${probeXPos.value.toFixed(2)} Y${probeYPos.value.toFixed(2)} F6000`);
 	const reply = await send("G30 S-1");
 	const z = parseProbeHeight(reply);
@@ -522,15 +568,9 @@ async function startMeasurement(): Promise<void> {
 			await send(`M104 S${config.heTemp}`);
 		}
 
-		// Wait for bed temperature
+		// Wait for bed temperature (guarded by a timeout in case of a heater fault)
 		phase.value = "heating";
-		while (measuring.value) {
-			const current = model.value.heat?.heaters?.[bedHeaterIndex.value]?.current ?? 0;
-			progress.value = Math.round(Math.min(99, (current / config.bedTemp) * 100));
-			phaseMessage.value = `${current.toFixed(1)} / ${config.bedTemp}°C`;
-			if (current >= config.bedTemp - 0.5) break;
-			await sleep(2000);
-		}
+		await waitForHeater("Bed", () => model.value.heat?.heaters?.[bedHeaterIndex.value]?.current ?? 0, config.bedTemp, 0.5);
 		if (!measuring.value) return;
 
 		// Heat soak
@@ -560,19 +600,21 @@ async function startMeasurement(): Promise<void> {
 			await send(config.homeZCmd.trim());
 		}
 
-		// Wait for hotend
-		if (config.heTemp > 0) {
+		// Wait for hotend (guarded by the same timeout)
+		const heIdx = model.value.tools?.[0]?.heaters?.[0] ?? -1;
+		if (config.heTemp > 0 && heIdx >= 0) {
 			phase.value = "heating";
-			phaseMessage.value = "waiting for hotend";
-			const heIdx = model.value.tools?.[0]?.heaters?.[0] ?? -1;
-			while (measuring.value && heIdx >= 0) {
-				const current = model.value.heat?.heaters?.[heIdx]?.current ?? 0;
-				phaseMessage.value = `Hotend ${current.toFixed(1)} / ${config.heTemp}°C`;
-				if (current >= config.heTemp - 1) break;
-				await sleep(2000);
-			}
+			await waitForHeater("Hotend", () => model.value.heat?.heaters?.[heIdx]?.current ?? 0, config.heTemp, 1);
 		}
 		if (!measuring.value) return;
+
+		// Configure the Z probe for nozzle probing (e.g. switch from a scanning probe), once, before
+		// any G30. Restored at the end / on abort via probeRestoreCmd.
+		if (config.probeSetupCmd.trim()) {
+			phase.value = "measuring";
+			phaseMessage.value = "configuring probe";
+			await send(config.probeSetupCmd.trim());
+		}
 
 		// Establish Z reference via initial probe
 		phase.value = "measuring";
@@ -637,6 +679,7 @@ async function startMeasurement(): Promise<void> {
 		// Finish
 		await send("M140 S0");
 		await send("M104 S0");
+		if (config.probeRestoreCmd.trim()) await send(config.probeRestoreCmd.trim());
 		phase.value = "done";
 		phaseMessage.value = `${dataPoints.value.length} samples collected`;
 		progress.value = 100;
@@ -645,9 +688,9 @@ async function startMeasurement(): Promise<void> {
 		if (result.value) tab.value = "results";
 	} catch (e) {
 		error.value = (e as Error).message || String(e);
-		phase.value = "idle";
+		phase.value = "error";
 		phaseMessage.value = "";
-		try { void send("M140 S0"); void send("M104 S0"); } catch { /* best-effort */ }
+		try { void send("M140 S0"); void send("M104 S0"); if (config.probeRestoreCmd.trim()) void send(config.probeRestoreCmd.trim()); } catch { /* best-effort */ }
 	} finally {
 		measuring.value = false;
 	}
@@ -657,7 +700,7 @@ function abort(): void {
 	measuring.value = false;
 	phase.value = "idle";
 	phaseMessage.value = "";
-	try { void send("M140 S0"); void send("M104 S0"); } catch { /* best-effort */ }
+	try { void send("M140 S0"); void send("M104 S0"); if (config.probeRestoreCmd.trim()) void send(config.probeRestoreCmd.trim()); } catch { /* best-effort */ }
 }
 
 // ── Analysis ───────────────────────────────────────────────────────────────────────────────────
