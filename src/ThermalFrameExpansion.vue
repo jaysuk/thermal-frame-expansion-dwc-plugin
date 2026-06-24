@@ -230,61 +230,13 @@
 					<!-- ── ABOUT / UPDATES ────────────────────────────────── -->
 					<v-tabs-window-item value="about">
 						<v-card-text>
-							<p class="text-body-2 text-medium-emphasis mb-4">
-								Measures how your printer's frame grows as it heats, by repeatedly probing Z during a heat-soak
-								and fitting Z drift against frame temperature. Use the resulting coefficient with a
-								<code>thermal-adjust</code> macro to compensate Z for frame temperature.
-							</p>
-
-							<div class="d-flex align-center mb-1">
-								<div class="text-subtitle-2">Updates</div>
-								<v-spacer />
-								<v-btn size="small" variant="text" :loading="checking" prepend-icon="mdi-refresh"
-									   @click="checkNow">Check now</v-btn>
-							</div>
-
-							<v-alert v-if="pendingReload" type="success" density="comfortable" class="mb-2">
-								<div class="d-flex align-center flex-wrap ga-2">
-									<div class="flex-grow-1">Update installed — reload DWC to finish.</div>
-									<v-btn color="success" prepend-icon="mdi-restart" @click="reloadPage">Reload</v-btn>
-								</div>
-							</v-alert>
-
-							<v-alert v-else-if="update && update.scenario === 'pluginUpdate'" type="info" density="comfortable" class="mb-2">
-								<div class="d-flex align-center flex-wrap ga-2">
-									<div class="flex-grow-1">
-										<div class="font-weight-medium">Update available: v{{ update.latestVersion }}</div>
-										<div class="text-caption">Installed: v{{ update.currentVersion }}</div>
-										<div v-if="!isConnected" class="text-caption text-warning">Connect to a machine to install.</div>
-									</div>
-									<v-btn color="primary" :loading="applying" :disabled="!isConnected" prepend-icon="mdi-download"
-										   @click="updateNow">Update now</v-btn>
-									<v-btn v-if="update.releaseUrl" variant="text" :href="update.releaseUrl" target="_blank" rel="noopener">Release notes</v-btn>
-									<v-btn variant="text" size="small" @click="dismissUpdate">Dismiss</v-btn>
-								</div>
-							</v-alert>
-
-							<v-alert v-else-if="update && update.scenario === 'dwcUpdate'" type="warning" density="comfortable" class="mb-2">
-								<div class="font-weight-medium">Update available: v{{ update.latestVersion }}</div>
-								<div class="text-caption">Needs DuetWebControl {{ update.requiredDwc }} (you have {{ update.runningDwc }})</div>
-							</v-alert>
-
-							<v-alert v-else-if="update && update.scenario === 'upToDate'" type="success" density="compact" class="mb-2">
-								Up to date (v{{ update.currentVersion }})
-							</v-alert>
-
-							<v-switch :model-value="checksEnabled" color="primary" density="compact" hide-details
-									  label="Check for updates on load" @update:model-value="onToggleChecks" />
-
-							<v-divider class="my-4" />
-							<div class="text-subtitle-2 mb-1">Diagnostics</div>
-							<p class="text-body-2 text-medium-emphasis mt-0 mb-2">
-								Bundle plugin versions, recent errors and a privacy-scrubbed object model to attach to a bug report.
-							</p>
-							<div class="d-flex flex-wrap ga-2">
-								<v-btn variant="tonal" prepend-icon="mdi-download" @click="downloadDiagnostics">Download report</v-btn>
-								<v-btn variant="tonal" prepend-icon="mdi-content-copy" @click="copyDiagnostics">Copy report</v-btn>
-							</div>
+							<AboutPanel plugin-id="ThermalFrameExpansion" title="Thermal Frame Expansion"
+								:description="aboutDescription" :model="machineStore.model"
+								repo="https://github.com/jaysuk/thermal-frame-expansion-dwc-plugin"
+								:update-available="update?.updateAvailable ?? false" :latest-version="update?.latestVersion"
+								:checking="checking" :applying="applying" :pending-reload="pendingReload" :auto-check="checksEnabled"
+								:extra-actions="aboutExtraActions"
+								@check-update="checkNow" @apply-update="updateNow" @toggle-auto-check="onToggleChecks" />
 						</v-card-text>
 					</v-tabs-window-item>
 
@@ -304,12 +256,12 @@ import { useMachineStore } from "@/stores/machine";
 import { useSettingsStore } from "@/stores/settings";
 import { LogLevel, useUiStore } from "@/stores/ui";
 
-import { buildReport, copyReport, downloadReport } from "dwc-plugin-runtime";
+import { AboutPanel, type AboutExtraAction, buildReport, copyReport } from "dwc-plugin-runtime";
 
 import { LS_CONFIG, PLUGIN_MANIFEST_ID } from "./model/constants";
 import { estimateDurationHours, type FitResult, linearFit, parseProbeHeight, r2Quality } from "./model/fit";
 import {
-	applying, applyUpdateNow, checking, dismissCurrentUpdate, pendingReload,
+	applying, applyUpdateNow, checking, pendingReload,
 	runUpdateCheck, setUpdateChecksEnabled, updateChecksEnabled, updateState as update,
 } from "./model/updateCheck";
 
@@ -893,8 +845,10 @@ function exportJSON(): void {
 const checksEnabled = ref(updateChecksEnabled());
 function checkNow(): void { void runUpdateCheck({ force: true }); }
 function updateNow(): void { void applyUpdateNow(); }
-function dismissUpdate(): void { dismissCurrentUpdate(); }
-function reloadPage(): void { window.location.reload(); }
+const aboutDescription = "Measures your printer frame's thermal-expansion coefficient by soaking at temperature and tracking the frame sensor, so you can compensate Z drift.";
+const aboutExtraActions = computed<Array<AboutExtraAction>>(() => [
+	{ label: "Copy diagnostic report", icon: "mdi-content-copy", onClick: () => { void copyDiagnostics(); } },
+]);
 function onToggleChecks(value: boolean | null): void {
 	const on = value === true;
 	checksEnabled.value = on;
@@ -909,7 +863,6 @@ function diagnosticReport() {
 		state: { config: { ...config }, samples: dataPoints.value.length, result: result.value },
 	});
 }
-function downloadDiagnostics(): void { downloadReport(diagnosticReport()); }
 async function copyDiagnostics(): Promise<void> {
 	const ok = await copyReport(diagnosticReport());
 	uiStore.makeNotification(
